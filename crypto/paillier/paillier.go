@@ -180,12 +180,39 @@ func (privateKey *PrivateKey) Decrypt(c *big.Int) (m *big.Int, err error) {
 	if cg.Cmp(one) == 1 {
 		return nil, ErrMessageMalFormed
 	}
+
+	var cExpLambda, gammaExpLambda *big.Int
+
+	if common.IsConstantTimeEnabled() {
+		// SECURITY: Use constant-time exponentiation to prevent timing side-channels.
+		// The original code used math/big.Exp which leaks information about the secret
+		// exponent LambdaN through execution time variations.
+		// See: https://github.com/golang/go/issues/20654
+		ctModN2 := common.NewCTModInt(N2)
+		cExpLambda = ctModN2.ExpCT(c, privateKey.LambdaN)
+		gammaExpLambda = ctModN2.ExpCT(privateKey.Gamma(), privateKey.LambdaN)
+	} else {
+		// Standard (non-constant-time) implementation for better performance
+		cExpLambda = new(big.Int).Exp(c, privateKey.LambdaN, N2)
+		gammaExpLambda = new(big.Int).Exp(privateKey.Gamma(), privateKey.LambdaN, N2)
+	}
+
 	// 1. L(u) = (c^LambdaN-1 mod N2) / N
-	Lc := L(new(big.Int).Exp(c, privateKey.LambdaN, N2), privateKey.N)
+	Lc := L(cExpLambda, privateKey.N)
+
 	// 2. L(u) = (Gamma^LambdaN-1 mod N2) / N
-	Lg := L(new(big.Int).Exp(privateKey.Gamma(), privateKey.LambdaN, N2), privateKey.N)
+	Lg := L(gammaExpLambda, privateKey.N)
+
 	// 3. (1) * modInv(2) mod N
-	inv := new(big.Int).ModInverse(Lg, privateKey.N)
+	var inv *big.Int
+	if common.IsConstantTimeEnabled() {
+		// SECURITY: Use constant-time ModInverse to prevent timing side-channels.
+		// Lg is derived from secret LambdaN exponentiation.
+		ctModN := common.NewCTModInt(privateKey.N)
+		inv = ctModN.ModInverseCT(Lg)
+	} else {
+		inv = new(big.Int).ModInverse(Lg, privateKey.N)
+	}
 	m = common.ModInt(privateKey.N).Mul(Lc, inv)
 	return
 }
@@ -200,9 +227,28 @@ func (privateKey *PrivateKey) Proof(k *big.Int, ecdsaPub *crypto2.ECPoint) Proof
 	var pi Proof
 	iters := ProofIters
 	xs := GenerateXs(iters, k, privateKey.N, ecdsaPub)
-	for i := 0; i < iters; i++ {
-		M := new(big.Int).ModInverse(privateKey.N, privateKey.PhiN)
-		pi[i] = new(big.Int).Exp(xs[i], M, privateKey.N)
+
+	// Compute M = N^(-1) mod PhiN once
+	var M *big.Int
+	if common.IsConstantTimeEnabled() {
+		// SECURITY: Use constant-time ModInverse to prevent timing side-channels.
+		// PhiN is secret, so we must use constant-time operations.
+		// See: https://github.com/golang/go/issues/20654
+		ctModPhiN := common.NewCTModInt(privateKey.PhiN)
+		M = ctModPhiN.ModInverseCT(privateKey.N)
+
+		// SECURITY: Use constant-time exponentiation.
+		// M is derived from secret PhiN, so we must use constant-time Exp.
+		ctModN := common.NewCTModInt(privateKey.N)
+		for i := 0; i < iters; i++ {
+			pi[i] = ctModN.ExpCT(xs[i], M)
+		}
+	} else {
+		M = new(big.Int).ModInverse(privateKey.N, privateKey.PhiN)
+		// Standard (non-constant-time) implementation for better performance
+		for i := 0; i < iters; i++ {
+			pi[i] = new(big.Int).Exp(xs[i], M, privateKey.N)
+		}
 	}
 	return pi
 }

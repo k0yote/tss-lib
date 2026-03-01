@@ -49,20 +49,38 @@ func NewProof(Session []byte, N, P, Q *big.Int, rand io.Reader) (*ProofMod, erro
 	}
 
 	// Fig 16.3
-	modN, modPhi := common.ModInt(N), common.ModInt(Phi)
-	invN := new(big.Int).ModInverse(N, Phi)
+	modN := common.ModInt(N)
+
+	var invN *big.Int
+	var ctModN *common.CTModInt
+
+	if common.IsConstantTimeEnabled() {
+		// SECURITY: Use constant-time operations to prevent timing side-channels.
+		// See: https://github.com/golang/go/issues/20654
+		ctModPhi := common.NewCTModInt(Phi)
+		invN = ctModPhi.ModInverseCT(N)
+		ctModN = common.NewCTModInt(N)
+	} else {
+		invN = new(big.Int).ModInverse(N, Phi)
+	}
+
 	X := [Iterations]*big.Int{}
 	// Fix bitLen of A and B
 	A := new(big.Int).Lsh(one, Iterations)
 	B := new(big.Int).Lsh(one, Iterations)
 	Z := [Iterations]*big.Int{}
 
-	// for fourth-root
+	// for fourth-root: expo = ((Phi + 4) / 8)^2 mod Phi
 	expo := new(big.Int).Add(Phi, big.NewInt(4))
 	expo = new(big.Int).Rsh(expo, 3)
-	expo = modPhi.Mul(expo, expo)
+	expo = new(big.Int).Mul(expo, expo)
+	expo = new(big.Int).Mod(expo, Phi)
 
 	for i := range Y {
+		var foundA, foundB int
+		var foundXi, foundZi *big.Int
+		found := false
+
 		for j := 0; j < 4; j++ {
 			a, b := j&1, j&2>>1
 			Yi := new(big.Int).SetBytes(Y[i].Bytes())
@@ -72,14 +90,33 @@ func NewProof(Session []byte, N, P, Q *big.Int, rand io.Reader) (*ProofMod, erro
 			if b > 0 {
 				Yi = modN.Mul(W, Yi)
 			}
-			if isQuadraticResidue(Yi, P) && isQuadraticResidue(Yi, Q) {
-				Xi := modN.Exp(Yi, expo)
-				Zi := modN.Exp(Y[i], invN)
-				X[i], Z[i] = Xi, Zi
-				A.SetBit(A, i, uint(a))
-				B.SetBit(B, i, uint(b))
-				break
+
+			isQRP := isQuadraticResidue(Yi, P)
+			isQRQ := isQuadraticResidue(Yi, Q)
+
+			if isQRP && isQRQ {
+				var Xi, Zi *big.Int
+				if common.IsConstantTimeEnabled() {
+					// Use constant-time exponentiation with secret-derived exponents
+					Xi = ctModN.ExpCT(Yi, expo)
+					Zi = ctModN.ExpCT(Y[i], invN)
+				} else {
+					Xi = modN.Exp(Yi, expo)
+					Zi = modN.Exp(Y[i], invN)
+				}
+
+				if !found {
+					foundXi, foundZi = Xi, Zi
+					foundA, foundB = a, b
+					found = true
+				}
 			}
+		}
+
+		if found {
+			X[i], Z[i] = foundXi, foundZi
+			A.SetBit(A, i, uint(foundA))
+			B.SetBit(B, i, uint(foundB))
 		}
 	}
 

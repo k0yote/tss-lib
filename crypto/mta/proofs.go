@@ -77,16 +77,31 @@ func ProveBobWC(Session []byte, ec elliptic.Curve, pk *paillier.PublicKey, NTild
 
 	// 6.
 	modNTilde := common.ModInt(NTilde)
-	z := modNTilde.Exp(h1, x)
-	z = modNTilde.Mul(z, modNTilde.Exp(h2, rho))
+	var z *big.Int
+	if common.IsConstantTimeEnabled() {
+		// SECURITY: Use constant-time exponentiation for secret x
+		// See: https://github.com/golang/go/issues/20654
+		ctModNTilde := common.NewCTModInt(NTilde)
+		z = ctModNTilde.ExpCT(h1, x)
+	} else {
+		z = modNTilde.Exp(h1, x)
+	}
+	z = modNTilde.Mul(z, modNTilde.Exp(h2, rho)) // rho is random, not secret
 
 	// 7.
 	zPrm := modNTilde.Exp(h1, alpha)
 	zPrm = modNTilde.Mul(zPrm, modNTilde.Exp(h2, rhoPrm))
 
 	// 8.
-	t := modNTilde.Exp(h1, y)
-	t = modNTilde.Mul(t, modNTilde.Exp(h2, sigma))
+	var t *big.Int
+	if common.IsConstantTimeEnabled() {
+		// SECURITY: Use constant-time exponentiation for secret y
+		ctModNTilde := common.NewCTModInt(NTilde)
+		t = ctModNTilde.ExpCT(h1, y)
+	} else {
+		t = modNTilde.Exp(h1, y)
+	}
+	t = modNTilde.Mul(t, modNTilde.Exp(h2, sigma)) // sigma is random, not secret
 
 	// 9.
 	modNSquared := common.ModInt(NSquared)

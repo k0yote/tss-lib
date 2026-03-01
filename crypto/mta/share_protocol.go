@@ -11,10 +11,21 @@ import (
 	"errors"
 	"io"
 	"math/big"
+	"time"
 
 	"github.com/bnb-chain/tss-lib/v2/common"
 	"github.com/bnb-chain/tss-lib/v2/crypto"
 	"github.com/bnb-chain/tss-lib/v2/crypto/paillier"
+)
+
+var (
+	// mtaTimingProtection provides response time normalization for MtA operations.
+	// This is a defense-in-depth measure against timing side-channel attacks.
+	// The target duration should exceed the maximum expected computation time.
+	mtaTimingProtection = common.NewTimingProtection(
+		200*time.Millisecond, // Target duration for Paillier decrypt operations
+		20*time.Millisecond,  // Jitter range
+	)
 )
 
 func AliceInit(
@@ -111,10 +122,24 @@ func AliceEnd(
 	if !pf.Verify(Session, ec, pkA, NTildeA, h1A, h2A, cA, cB) {
 		return nil, errors.New("ProofBob.Verify() returned false")
 	}
-	alphaPrm, err := sk.Decrypt(cB)
+
+	var alphaPrm *big.Int
+	var err error
+
+	if common.IsConstantTimeEnabled() {
+		// Apply timing protection to Paillier decryption when constant-time mode is enabled.
+		// This normalizes the response time to prevent timing side-channel attacks.
+		alphaPrm, err = mtaTimingProtection.ProtectBigInt(func() (*big.Int, error) {
+			return sk.Decrypt(cB)
+		})
+	} else {
+		// Standard decryption without timing protection
+		alphaPrm, err = sk.Decrypt(cB)
+	}
 	if err != nil {
 		return nil, err
 	}
+
 	q := ec.Params().N
 	return new(big.Int).Mod(alphaPrm, q), nil
 }
@@ -131,10 +156,24 @@ func AliceEndWC(
 	if !pf.Verify(Session, ec, pkA, NTildeA, h1A, h2A, cA, cB, B) {
 		return nil, errors.New("ProofBobWC.Verify() returned false")
 	}
-	alphaPrm, err := sk.Decrypt(cB)
+
+	var alphaPrm *big.Int
+	var err error
+
+	if common.IsConstantTimeEnabled() {
+		// Apply timing protection to Paillier decryption when constant-time mode is enabled.
+		// This normalizes the response time to prevent timing side-channel attacks.
+		alphaPrm, err = mtaTimingProtection.ProtectBigInt(func() (*big.Int, error) {
+			return sk.Decrypt(cB)
+		})
+	} else {
+		// Standard decryption without timing protection
+		alphaPrm, err = sk.Decrypt(cB)
+	}
 	if err != nil {
 		return nil, err
 	}
+
 	q := ec.Params().N
 	return new(big.Int).Mod(alphaPrm, q), nil
 }

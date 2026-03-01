@@ -57,8 +57,16 @@ func ProveRangeAlice(ec elliptic.Curve, pk *paillier.PublicKey, c, NTilde, h1, h
 
 	// 5.
 	modNTilde := common.ModInt(NTilde)
-	z := modNTilde.Exp(h1, m)
-	z = modNTilde.Mul(z, modNTilde.Exp(h2, rho))
+	var z *big.Int
+	if common.IsConstantTimeEnabled() {
+		// SECURITY: Use constant-time exponentiation for secret message m
+		// See: https://github.com/golang/go/issues/20654
+		ctModNTilde := common.NewCTModInt(NTilde)
+		z = ctModNTilde.ExpCT(h1, m)
+	} else {
+		z = modNTilde.Exp(h1, m)
+	}
+	z = modNTilde.Mul(z, modNTilde.Exp(h2, rho)) // rho is random, not secret
 
 	// 6.
 	modNSquared := common.ModInt(pk.NSquare())
@@ -107,6 +115,12 @@ func RangeProofAliceFromBytes(bzs [][]byte) (*RangeProofAlice, error) {
 
 func (pf *RangeProofAlice) Verify(ec elliptic.Curve, pk *paillier.PublicKey, NTilde, h1, h2, c *big.Int) bool {
 	if pf == nil || !pf.ValidateBasic() || pk == nil || NTilde == nil || h1 == nil || h2 == nil || c == nil {
+		return false
+	}
+	// Reject c where gcd(c, N) != 1 to prevent nil pointer dereference from c^(-e) in modular exponentiation.
+	// When gcd(c, N) != 1, the modular inverse doesn't exist and big.Int.Exp returns nil.
+	// This also covers the c == 0 case.
+	if new(big.Int).GCD(nil, nil, c, pk.N).Cmp(one) != 0 {
 		return false
 	}
 

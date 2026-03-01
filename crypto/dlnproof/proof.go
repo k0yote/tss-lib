@@ -36,18 +36,41 @@ func NewDLNProof(h1, h2, x, p, q, N *big.Int, rand io.Reader) *Proof {
 	modN, modPQ := common.ModInt(N), common.ModInt(pMulQ)
 	a := make([]*big.Int, Iterations)
 	alpha := [Iterations]*big.Int{}
-	for i := range alpha {
-		a[i] = common.GetRandomPositiveInt(rand, pMulQ)
-		alpha[i] = modN.Exp(h1, a[i])
+
+	if common.IsConstantTimeEnabled() {
+		// SECURITY: Use constant-time exponentiation
+		ctModN := common.NewCTModInt(N)
+		for i := range alpha {
+			a[i] = common.GetRandomPositiveInt(rand, pMulQ)
+			alpha[i] = ctModN.ExpCT(h1, a[i])
+		}
+	} else {
+		for i := range alpha {
+			a[i] = common.GetRandomPositiveInt(rand, pMulQ)
+			alpha[i] = modN.Exp(h1, a[i])
+		}
 	}
+
 	msg := append([]*big.Int{h1, h2, N}, alpha[:]...)
 	c := common.SHA512_256i(msg...)
 	t := [Iterations]*big.Int{}
 	cIBI := new(big.Int)
-	for i := range t {
-		cI := c.Bit(i)
-		cIBI = cIBI.SetInt64(int64(cI))
-		t[i] = modPQ.Add(a[i], modPQ.Mul(cIBI, x))
+
+	if common.IsConstantTimeEnabled() {
+		// SECURITY: Use constant-time multiplication for secret x
+		ctModPQ := common.NewCTModInt(pMulQ)
+		for i := range t {
+			cI := c.Bit(i)
+			cIBI = cIBI.SetInt64(int64(cI))
+			cMulX := ctModPQ.MulCT(cIBI, x)
+			t[i] = modPQ.Add(a[i], cMulX)
+		}
+	} else {
+		for i := range t {
+			cI := c.Bit(i)
+			cIBI = cIBI.SetInt64(int64(cI))
+			t[i] = modPQ.Add(a[i], modPQ.Mul(cIBI, x))
+		}
 	}
 	return &Proof{alpha, t}
 }
