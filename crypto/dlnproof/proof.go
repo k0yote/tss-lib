@@ -31,7 +31,7 @@ type (
 
 var one = big.NewInt(1)
 
-func NewDLNProof(h1, h2, x, p, q, N *big.Int, rand io.Reader) *Proof {
+func NewDLNProof(Session []byte, h1, h2, x, p, q, N *big.Int, rand io.Reader) *Proof {
 	pMulQ := new(big.Int).Mul(p, q)
 	modN, modPQ := common.ModInt(N), common.ModInt(pMulQ)
 	a := make([]*big.Int, Iterations)
@@ -52,7 +52,7 @@ func NewDLNProof(h1, h2, x, p, q, N *big.Int, rand io.Reader) *Proof {
 	}
 
 	msg := append([]*big.Int{h1, h2, N}, alpha[:]...)
-	c := common.SHA512_256i(msg...)
+	c := common.SHA512_256i_TAGGED(Session, msg...)
 	t := [Iterations]*big.Int{}
 	cIBI := new(big.Int)
 
@@ -75,7 +75,7 @@ func NewDLNProof(h1, h2, x, p, q, N *big.Int, rand io.Reader) *Proof {
 	return &Proof{alpha, t}
 }
 
-func (p *Proof) Verify(h1, h2, N *big.Int) bool {
+func (p *Proof) Verify(Session []byte, h1, h2, N *big.Int) bool {
 	if p == nil {
 		return false
 	}
@@ -107,7 +107,7 @@ func (p *Proof) Verify(h1, h2, N *big.Int) bool {
 		}
 	}
 	msg := append([]*big.Int{h1, h2, N}, p.Alpha[:]...)
-	c := common.SHA512_256i(msg...)
+	c := common.SHA512_256i_TAGGED(Session, msg...)
 	cIBI := new(big.Int)
 	for i := 0; i < Iterations; i++ {
 		if p.Alpha[i] == nil || p.T[i] == nil {

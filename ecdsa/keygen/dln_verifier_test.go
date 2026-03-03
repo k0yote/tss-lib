@@ -15,6 +15,8 @@ import (
 	"github.com/bnb-chain/tss-lib/v2/crypto/dlnproof"
 )
 
+var dlnTestSession = []byte("dln-test-session")
+
 func BenchmarkDlnProof_Verify(b *testing.B) {
 	localPartySaveData, _, err := LoadKeygenTestFixtures(1)
 	if err != nil {
@@ -24,6 +26,7 @@ func BenchmarkDlnProof_Verify(b *testing.B) {
 	params := localPartySaveData[0].LocalPreParams
 
 	proof := dlnproof.NewDLNProof(
+		dlnTestSession,
 		params.H1i,
 		params.H2i,
 		params.Alpha,
@@ -35,7 +38,7 @@ func BenchmarkDlnProof_Verify(b *testing.B) {
 
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		proof.Verify(params.H1i, params.H2i, params.NTildei)
+		proof.Verify(dlnTestSession, params.H1i, params.H2i, params.NTildei)
 	}
 }
 
@@ -50,7 +53,7 @@ func BenchmarkDlnVerifier_VerifyProof1(b *testing.B) {
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		resultChan := make(chan bool)
-		verifier.VerifyDLNProof1(message, preParams.H1i, preParams.H2i, preParams.NTildei, func(result bool) {
+		verifier.VerifyDLNProof1(dlnTestSession, message, preParams.H1i, preParams.H2i, preParams.NTildei, func(result bool) {
 			resultChan <- result
 		})
 		<-resultChan
@@ -68,7 +71,7 @@ func BenchmarkDlnVerifier_VerifyProof2(b *testing.B) {
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		resultChan := make(chan bool)
-		verifier.VerifyDLNProof2(message, preParams.H1i, preParams.H2i, preParams.NTildei, func(result bool) {
+		verifier.VerifyDLNProof2(dlnTestSession, message, preParams.H1i, preParams.H2i, preParams.NTildei, func(result bool) {
 			resultChan <- result
 		})
 		<-resultChan
@@ -85,7 +88,7 @@ func TestVerifyDLNProof1_Success(t *testing.T) {
 
 	resultChan := make(chan bool)
 
-	verifier.VerifyDLNProof1(message, preParams.H1i, preParams.H2i, preParams.NTildei, func(result bool) {
+	verifier.VerifyDLNProof1(dlnTestSession, message, preParams.H1i, preParams.H2i, preParams.NTildei, func(result bool) {
 		resultChan <- result
 	})
 
@@ -105,7 +108,7 @@ func TestVerifyDLNProof1_MalformedMessage(t *testing.T) {
 
 	resultChan := make(chan bool)
 
-	verifier.VerifyDLNProof1(message, preParams.H1i, preParams.H2i, preParams.NTildei, func(result bool) {
+	verifier.VerifyDLNProof1(dlnTestSession, message, preParams.H1i, preParams.H2i, preParams.NTildei, func(result bool) {
 		resultChan <- result
 	})
 
@@ -126,7 +129,7 @@ func TestVerifyDLNProof1_IncorrectProof(t *testing.T) {
 	resultChan := make(chan bool)
 
 	wrongH1i := preParams.H1i.Sub(preParams.H1i, big.NewInt(1))
-	verifier.VerifyDLNProof1(message, wrongH1i, preParams.H2i, preParams.NTildei, func(result bool) {
+	verifier.VerifyDLNProof1(dlnTestSession, message, wrongH1i, preParams.H2i, preParams.NTildei, func(result bool) {
 		resultChan <- result
 	})
 
@@ -146,7 +149,7 @@ func TestVerifyDLNProof2_Success(t *testing.T) {
 
 	resultChan := make(chan bool)
 
-	verifier.VerifyDLNProof2(message, preParams.H1i, preParams.H2i, preParams.NTildei, func(result bool) {
+	verifier.VerifyDLNProof2(dlnTestSession, message, preParams.H1i, preParams.H2i, preParams.NTildei, func(result bool) {
 		resultChan <- result
 	})
 
@@ -166,7 +169,7 @@ func TestVerifyDLNProof2_MalformedMessage(t *testing.T) {
 
 	resultChan := make(chan bool)
 
-	verifier.VerifyDLNProof2(message, preParams.H1i, preParams.H2i, preParams.NTildei, func(result bool) {
+	verifier.VerifyDLNProof2(dlnTestSession, message, preParams.H1i, preParams.H2i, preParams.NTildei, func(result bool) {
 		resultChan <- result
 	})
 
@@ -187,7 +190,7 @@ func TestVerifyDLNProof2_IncorrectProof(t *testing.T) {
 	resultChan := make(chan bool)
 
 	wrongH2i := preParams.H2i.Add(preParams.H2i, big.NewInt(1))
-	verifier.VerifyDLNProof2(message, preParams.H1i, wrongH2i, preParams.NTildei, func(result bool) {
+	verifier.VerifyDLNProof2(dlnTestSession, message, preParams.H1i, wrongH2i, preParams.NTildei, func(result bool) {
 		resultChan <- result
 	})
 
@@ -224,6 +227,7 @@ func prepareProof() (*LocalPreParams, [][]byte, error) {
 	preParams := localPartySaveData[0].LocalPreParams
 
 	proof := dlnproof.NewDLNProof(
+		dlnTestSession,
 		preParams.H1i,
 		preParams.H2i,
 		preParams.Alpha,

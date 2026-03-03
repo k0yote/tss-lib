@@ -46,7 +46,7 @@ func TestShareProtocol(t *testing.T) {
 	NTildej, h1j, h2j, err := keygen.LoadNTildeH1H2FromTestFixture(1)
 	assert.NoError(t, err)
 
-	cA, pf, err := AliceInit(tss.EC(), pk, a, NTildej, h1j, h2j, rand.Reader)
+	cA, pf, err := AliceInit(Session, tss.EC(), pk, a, NTildej, h1j, h2j, rand.Reader)
 	assert.NoError(t, err)
 
 	_, cB, betaPrm, pfB, err := BobMid(Session, tss.EC(), pk, pf, b, cA, NTildei, h1i, h2i, NTildej, h1j, h2j, rand.Reader)
@@ -80,7 +80,7 @@ func TestShareProtocolWC(t *testing.T) {
 	NTildej, h1j, h2j, err := keygen.LoadNTildeH1H2FromTestFixture(1)
 	assert.NoError(t, err)
 
-	cA, pf, err := AliceInit(tss.EC(), pk, a, NTildej, h1j, h2j, rand.Reader)
+	cA, pf, err := AliceInit(Session, tss.EC(), pk, a, NTildej, h1j, h2j, rand.Reader)
 	assert.NoError(t, err)
 
 	gBPoint, err := crypto.NewECPoint(tss.EC(), gBX, gBY)
