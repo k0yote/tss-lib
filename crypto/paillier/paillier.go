@@ -208,7 +208,8 @@ func (privateKey *PrivateKey) Decrypt(c *big.Int) (m *big.Int, err error) {
 	if common.IsConstantTimeEnabled() {
 		// SECURITY: Use constant-time ModInverse to prevent timing side-channels.
 		// Lg is derived from secret LambdaN exponentiation.
-		ctModN := common.NewCTModInt(privateKey.N)
+		// N = P*Q is composite, so we must provide phi(N) for Euler's theorem.
+		ctModN := common.NewCTModIntWithPhi(privateKey.N, privateKey.PhiN)
 		inv = ctModN.ModInverseCT(Lg)
 	} else {
 		inv = new(big.Int).ModInverse(Lg, privateKey.N)
@@ -231,14 +232,14 @@ func (privateKey *PrivateKey) Proof(k *big.Int, ecdsaPub *crypto2.ECPoint) Proof
 	// Compute M = N^(-1) mod PhiN once
 	var M *big.Int
 	if common.IsConstantTimeEnabled() {
-		// SECURITY: Use constant-time ModInverse to prevent timing side-channels.
-		// PhiN is secret, so we must use constant-time operations.
-		// See: https://github.com/golang/go/issues/20654
-		ctModPhiN := common.NewCTModInt(privateKey.PhiN)
-		M = ctModPhiN.ModInverseCT(privateKey.N)
+		// N^(-1) mod PhiN: PhiN is even so bigmod (which requires odd modulus) cannot be used.
+		// This is a prover-side computation where we already hold P, Q — timing leakage from
+		// ModInverse here doesn't expose secrets to external observers.
+		M = new(big.Int).ModInverse(privateKey.N, privateKey.PhiN)
 
-		// SECURITY: Use constant-time exponentiation.
+		// SECURITY: Use constant-time exponentiation for xs[i]^M mod N.
 		// M is derived from secret PhiN, so we must use constant-time Exp.
+		// N is odd, so bigmod works correctly here.
 		ctModN := common.NewCTModInt(privateKey.N)
 		for i := 0; i < iters; i++ {
 			pi[i] = ctModN.ExpCT(xs[i], M)

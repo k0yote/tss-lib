@@ -15,7 +15,9 @@
 package common
 
 import (
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/hex"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -84,76 +86,64 @@ func NewCTModInt(mod *big.Int) *CTModInt {
 	}
 }
 
+// reduceToPaddedBytes reduces val mod ct.modBigInt and returns a zero-padded
+// byte slice of length ct.byteLen suitable for bigmod.Nat.SetBytes.
+// The reduction uses big.Int.Mod which is safe here because the modulus is public.
+func (ct *CTModInt) reduceToPaddedBytes(val *big.Int) []byte {
+	reduced := val
+	if val.Sign() < 0 || val.Cmp(ct.modBigInt) >= 0 {
+		reduced = new(big.Int).Mod(val, ct.modBigInt)
+	}
+
+	buf := ct.bytePool.Get().([]byte)
+	for i := range buf {
+		buf[i] = 0
+	}
+	b := reduced.Bytes()
+	copy(buf[ct.byteLen-len(b):], b)
+	return buf
+}
+
 // ExpCT performs constant-time modular exponentiation using bigmod.
-// IMPORTANT: The modulus must be odd. For Paillier N² where N = p*q with
-// odd primes, N² is always odd, so this is safe.
+// IMPORTANT: The modulus must be odd. Negative exponents are not supported and will panic.
 func (ct *CTModInt) ExpCT(base, exp *big.Int) *big.Int {
 	if exp.Sign() == 0 {
 		return big.NewInt(1)
 	}
 	if exp.Sign() < 0 {
-		baseInv := new(big.Int).ModInverse(base, ct.modBigInt)
-		if baseInv == nil {
-			return nil
-		}
-		base = baseInv
-		exp = new(big.Int).Neg(exp)
+		panic("ExpCT: negative exponents are not supported; use ModInverseCT explicitly")
 	}
 
-	// Get pooled buffer for base padding
-	paddedBase := ct.bytePool.Get().([]byte)
+	paddedBase := ct.reduceToPaddedBytes(base)
 	defer ct.bytePool.Put(paddedBase)
 
-	// Clear and fill buffer
-	for i := range paddedBase {
-		paddedBase[i] = 0
-	}
-	baseBytes := base.Bytes()
-	copy(paddedBase[ct.byteLen-len(baseBytes):], baseBytes)
-
-	// Convert base to bigmod.Nat and reduce
 	baseNat := bigmod.NewNat()
 	baseNat.SetBytes(paddedBase, ct.mod)
 
-	// Perform constant-time exponentiation
 	expBytes := exp.Bytes()
 	result := bigmod.NewNat()
 	result.Exp(baseNat, expBytes, ct.mod)
 
-	// Convert result back to big.Int
 	return new(big.Int).SetBytes(result.Bytes(ct.mod))
 }
 
 // ModInverseCT computes the modular inverse in constant time using Fermat's little theorem.
-// For a prime modulus p: a^(-1) ≡ a^(p-2) mod p
-// For a non-prime modulus n with known φ(n): a^(-1) ≡ a^(φ(n)-1) mod n
+// For a prime modulus p: a^(-1) = a^(p-2) mod p
+// For a non-prime modulus n with known phi(n): a^(-1) = a^(phi(n)-1) mod n
 // SECURITY: This uses constant-time Exp, making the entire operation constant-time.
 // Note: The modulus should be prime for this to work correctly. For composite moduli,
-// use NewCTModIntWithPhi to provide φ(n).
+// use NewCTModIntWithPhi to provide phi(n).
 func (ct *CTModInt) ModInverseCT(a *big.Int) *big.Int {
 	if a.Sign() == 0 {
 		return nil
 	}
 
-	// Get pooled buffer for padding
-	paddedA := ct.bytePool.Get().([]byte)
+	paddedA := ct.reduceToPaddedBytes(a)
 	defer ct.bytePool.Put(paddedA)
 
-	// Clear and fill buffer
-	for i := range paddedA {
-		paddedA[i] = 0
-	}
-	aBytes := a.Bytes()
-	copy(paddedA[ct.byteLen-len(aBytes):], aBytes)
-
-	// Convert to bigmod.Nat
 	aNat := bigmod.NewNat()
-	if _, err := aNat.SetBytes(paddedA, ct.mod); err != nil {
-		// Value out of range, fall back to standard ModInverse
-		return new(big.Int).ModInverse(a, ct.modBigInt)
-	}
+	aNat.SetBytes(paddedA, ct.mod)
 
-	// a^(mod-2) mod mod using constant-time Exp
 	result := bigmod.NewNat()
 	result.Exp(aNat, ct.modMinusTwo, ct.mod)
 
@@ -167,52 +157,23 @@ func (ct *CTModInt) Mod() *big.Int {
 
 // MulCT performs constant-time modular multiplication using bigmod.
 func (ct *CTModInt) MulCT(x, y *big.Int) *big.Int {
-	// Get pooled buffers
-	paddedX := ct.bytePool.Get().([]byte)
-	paddedY := ct.bytePool.Get().([]byte)
+	paddedX := ct.reduceToPaddedBytes(x)
+	paddedY := ct.reduceToPaddedBytes(y)
 	defer ct.bytePool.Put(paddedX)
 	defer ct.bytePool.Put(paddedY)
 
-	// Clear and fill buffers
-	for i := range paddedX {
-		paddedX[i] = 0
-	}
-	for i := range paddedY {
-		paddedY[i] = 0
-	}
-	xBytes := x.Bytes()
-	yBytes := y.Bytes()
-	copy(paddedX[ct.byteLen-len(xBytes):], xBytes)
-	copy(paddedY[ct.byteLen-len(yBytes):], yBytes)
-
-	// Convert to bigmod.Nat
 	xNat := bigmod.NewNat()
 	yNat := bigmod.NewNat()
-	if _, err := xNat.SetBytes(paddedX, ct.mod); err != nil {
-		// Value out of range, reduce first
-		xReduced := new(big.Int).Mod(x, ct.modBigInt)
-		copy(paddedX, make([]byte, ct.byteLen))
-		xBytes = xReduced.Bytes()
-		copy(paddedX[ct.byteLen-len(xBytes):], xBytes)
-		xNat.SetBytes(paddedX, ct.mod)
-	}
-	if _, err := yNat.SetBytes(paddedY, ct.mod); err != nil {
-		// Value out of range, reduce first
-		yReduced := new(big.Int).Mod(y, ct.modBigInt)
-		copy(paddedY, make([]byte, ct.byteLen))
-		yBytes = yReduced.Bytes()
-		copy(paddedY[ct.byteLen-len(yBytes):], yBytes)
-		yNat.SetBytes(paddedY, ct.mod)
-	}
+	xNat.SetBytes(paddedX, ct.mod)
+	yNat.SetBytes(paddedY, ct.mod)
 
-	// Constant-time multiplication
 	xNat.Mul(yNat, ct.mod)
 
 	return new(big.Int).SetBytes(xNat.Bytes(ct.mod))
 }
 
 // NewCTModIntWithPhi creates a constant-time modular context for composite moduli.
-// This is required for correct ModInverse on composite moduli where φ(n) is known.
+// This is required for correct ModInverse on composite moduli where phi(n) is known.
 // For RSA-like moduli n = p*q, pass phiN = (p-1)*(q-1).
 func NewCTModIntWithPhi(mod, phiN *big.Int) *CTModInt {
 	modBytes := mod.Bytes()
@@ -221,14 +182,14 @@ func NewCTModIntWithPhi(mod, phiN *big.Int) *CTModInt {
 		panic(err)
 	}
 
-	// For composite modulus: a^(-1) = a^(φ(n)-1) mod n
+	// For composite modulus: a^(-1) = a^(phi(n)-1) mod n
 	phiMinusOne := new(big.Int).Sub(phiN, big.NewInt(1))
 
 	byteLen := len(modBytes)
 	return &CTModInt{
 		mod:         m,
 		modBigInt:   new(big.Int).Set(mod),
-		modMinusTwo: phiMinusOne.Bytes(), // Use φ(n)-1 instead of n-2
+		modMinusTwo: phiMinusOne.Bytes(), // Use phi(n)-1 instead of n-2
 		byteLen:     byteLen,
 		bytePool: sync.Pool{
 			New: func() interface{} {
@@ -243,7 +204,7 @@ var ctModCache sync.Map
 
 // GetCTModInt returns a cached or new CTModInt for the given modulus.
 func GetCTModInt(mod *big.Int) *CTModInt {
-	key := mod.String()
+	key := hex.EncodeToString(mod.Bytes())
 	if cached, ok := ctModCache.Load(key); ok {
 		return cached.(*CTModInt)
 	}
@@ -259,6 +220,9 @@ type TimingProtection struct {
 }
 
 // NewTimingProtection creates a TimingProtection with custom parameters.
+// targetDuration is the minimum padded duration for every operation.
+// jitterRange adds a random delay on top of targetDuration to prevent fingerprinting
+// the fixed padding boundary.
 func NewTimingProtection(targetDuration, jitterRange time.Duration) *TimingProtection {
 	return &TimingProtection{
 		targetDuration: targetDuration,
@@ -267,31 +231,53 @@ func NewTimingProtection(targetDuration, jitterRange time.Duration) *TimingProte
 }
 
 // ProtectBigInt wraps a function that returns *big.Int with timing normalization.
+// The total execution time is always >= targetDuration + a random jitter, regardless
+// of how long the actual operation takes.
 func (tp *TimingProtection) ProtectBigInt(fn func() (*big.Int, error)) (*big.Int, error) {
 	startTime := time.Now()
 	result, err := fn()
 	elapsed := time.Since(startTime)
 
-	if remaining := tp.targetDuration - elapsed; remaining > 0 {
+	padTo := tp.targetDuration
+	if elapsed > padTo {
+		padTo = elapsed
+	}
+	if tp.jitterRange > 0 {
+		jitterNanos, _ := rand.Int(rand.Reader, big.NewInt(int64(tp.jitterRange)))
+		padTo += time.Duration(jitterNanos.Int64())
+	}
+	if remaining := padTo - elapsed; remaining > 0 {
 		time.Sleep(remaining)
 	}
 	return result, err
 }
 
 // ConstantTimeCompare compares two big.Int values in constant time.
-func ConstantTimeCompare(a, b *big.Int) int {
+// Both values are padded to padLen bytes before comparison to avoid leaking
+// relative magnitude. If padLen is 0, the maximum of the two byte lengths is used.
+func ConstantTimeCompare(a, b *big.Int, padLen int) int {
 	aBytes := a.Bytes()
 	bBytes := b.Bytes()
 
-	maxLen := len(aBytes)
-	if len(bBytes) > maxLen {
-		maxLen = len(bBytes)
+	if padLen <= 0 {
+		padLen = len(aBytes)
+		if len(bBytes) > padLen {
+			padLen = len(bBytes)
+		}
 	}
 
-	padA := make([]byte, maxLen)
-	padB := make([]byte, maxLen)
-	copy(padA[maxLen-len(aBytes):], aBytes)
-	copy(padB[maxLen-len(bBytes):], bBytes)
+	padA := make([]byte, padLen)
+	padB := make([]byte, padLen)
+	if len(aBytes) <= padLen {
+		copy(padA[padLen-len(aBytes):], aBytes)
+	} else {
+		copy(padA, aBytes[len(aBytes)-padLen:])
+	}
+	if len(bBytes) <= padLen {
+		copy(padB[padLen-len(bBytes):], bBytes)
+	} else {
+		copy(padB, bBytes[len(bBytes)-padLen:])
+	}
 
 	return subtle.ConstantTimeCompare(padA, padB)
 }

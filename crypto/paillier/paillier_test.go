@@ -155,3 +155,32 @@ func TestGenerateXs(t *testing.T) {
 		assert.True(t, common.IsNumberInMultiplicativeGroup(N, xi))
 	}
 }
+
+func TestEncryptDecryptCT(t *testing.T) {
+	setUp(t)
+	common.EnableConstantTimeOps()
+	defer common.DisableConstantTimeOps()
+
+	exp := big.NewInt(100)
+	cypher, err := privateKey.Encrypt(rand.Reader, exp)
+	assert.NoError(t, err)
+
+	ret, err := privateKey.Decrypt(cypher)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, exp.Cmp(ret),
+		"CT decryption mismatch: got ", ret, " expected ", exp)
+}
+
+func TestProofVerifyCT(t *testing.T) {
+	setUp(t)
+	common.EnableConstantTimeOps()
+	defer common.DisableConstantTimeOps()
+
+	ki := common.MustGetRandomInt(rand.Reader, 256)
+	ui := common.GetRandomPositiveInt(rand.Reader, tss.EC().Params().N)
+	yX, yY := tss.EC().ScalarBaseMult(ui.Bytes())
+	proof := privateKey.Proof(ki, crypto.NewECPointNoCurveCheck(tss.EC(), yX, yY))
+	res, err := proof.Verify(publicKey.N, ki, crypto.NewECPointNoCurveCheck(tss.EC(), yX, yY))
+	assert.NoError(t, err)
+	assert.True(t, res, "CT proof verify result must be true")
+}

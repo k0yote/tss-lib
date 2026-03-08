@@ -55,10 +55,10 @@ func NewProof(Session []byte, N, P, Q *big.Int, rand io.Reader) (*ProofMod, erro
 	var ctModN *common.CTModInt
 
 	if common.IsConstantTimeEnabled() {
-		// SECURITY: Use constant-time operations to prevent timing side-channels.
-		// See: https://github.com/golang/go/issues/20654
-		ctModPhi := common.NewCTModInt(Phi)
-		invN = ctModPhi.ModInverseCT(N)
+		// N^(-1) mod Phi: Phi is even so bigmod (which requires odd modulus) cannot be used.
+		// This is a prover-side computation where we already hold P, Q — timing leakage from
+		// ModInverse here doesn't expose secrets to external observers.
+		invN = new(big.Int).ModInverse(N, Phi)
 		ctModN = common.NewCTModInt(N)
 	} else {
 		invN = new(big.Int).ModInverse(N, Phi)

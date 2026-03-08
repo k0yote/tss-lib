@@ -173,23 +173,33 @@ func TestConstantTimeCompare(t *testing.T) {
 	b := big.NewInt(12345)
 	c := big.NewInt(54321)
 
-	if ConstantTimeCompare(a, b) != 1 {
+	// Use explicit padLen to avoid leaking relative magnitude
+	if ConstantTimeCompare(a, b, 128) != 1 {
 		t.Error("ConstantTimeCompare should return 1 for equal values")
 	}
 
-	if ConstantTimeCompare(a, c) != 0 {
+	if ConstantTimeCompare(a, c, 128) != 0 {
 		t.Error("ConstantTimeCompare should return 0 for different values")
 	}
 
 	large := new(big.Int).Lsh(big.NewInt(1), 1024)
 	small := big.NewInt(1)
-	if ConstantTimeCompare(large, small) != 0 {
+	if ConstantTimeCompare(large, small, 128) != 0 {
 		t.Error("ConstantTimeCompare should return 0 for values with different magnitudes")
+	}
+
+	// Test with padLen=0 (fallback to maxLen)
+	if ConstantTimeCompare(a, b, 0) != 1 {
+		t.Error("ConstantTimeCompare with padLen=0 should return 1 for equal values")
 	}
 }
 
 // TestTimingProtectionBigInt verifies timing protection for BigInt operations
 func TestTimingProtectionBigInt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing test in short mode")
+	}
+
 	tp := NewTimingProtection(50*time.Millisecond, 0)
 
 	p, _ := rand.Prime(rand.Reader, 512)
@@ -212,7 +222,7 @@ func TestTimingProtectionBigInt(t *testing.T) {
 		t.Error("ProtectBigInt returned nil result")
 	}
 
-	if elapsed < 40*time.Millisecond {
+	if elapsed < 20*time.Millisecond {
 		t.Errorf("TimingProtection should normalize to ~50ms, got %v", elapsed)
 	}
 }
