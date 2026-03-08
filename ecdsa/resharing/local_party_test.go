@@ -17,13 +17,13 @@ import (
 	"github.com/ipfs/go-log"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
-	"github.com/bnb-chain/tss-lib/v2/crypto"
-	"github.com/bnb-chain/tss-lib/v2/ecdsa/keygen"
-	. "github.com/bnb-chain/tss-lib/v2/ecdsa/resharing"
-	"github.com/bnb-chain/tss-lib/v2/ecdsa/signing"
-	"github.com/bnb-chain/tss-lib/v2/test"
-	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/bnb-chain/tss-lib/v3/common"
+	"github.com/bnb-chain/tss-lib/v3/crypto"
+	"github.com/bnb-chain/tss-lib/v3/ecdsa/keygen"
+	. "github.com/bnb-chain/tss-lib/v3/ecdsa/resharing"
+	"github.com/bnb-chain/tss-lib/v3/ecdsa/signing"
+	"github.com/bnb-chain/tss-lib/v3/test"
+	"github.com/bnb-chain/tss-lib/v3/tss"
 )
 
 const (

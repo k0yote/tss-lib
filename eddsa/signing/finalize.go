@@ -12,7 +12,7 @@ import (
 	"math/big"
 
 	"github.com/agl/ed25519/edwards25519"
-	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/bnb-chain/tss-lib/v3/tss"
 	"github.com/decred/dcrd/dcrec/edwards/v2"
 )
 
