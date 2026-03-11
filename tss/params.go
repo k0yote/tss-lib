@@ -10,6 +10,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"io"
+	"math/big"
 	"runtime"
 	"time"
 )
@@ -23,8 +24,12 @@ type (
 		threshold           int
 		concurrency         int
 		safePrimeGenTimeout time.Duration
-		// proof session info
-		nonce int
+		// sessionNonce provides per-session SSID uniqueness for GG20 session binding.
+		// For signing, defaults to the message hash if not set.
+		// For keygen/resharing, the caller SHOULD set this to a value agreed upon by
+		// all parties (e.g., a coordinator-assigned session ID) to prevent cross-session
+		// proof replay. If not set, falls back to 0 (no session binding).
+		sessionNonce *big.Int
 		// for keygen
 		noProofMod bool
 		noProofFac bool
@@ -126,6 +131,20 @@ func (params *Parameters) SetPartialKeyRand(rand io.Reader) {
 
 func (params *Parameters) SetRand(rand io.Reader) {
 	params.rand = rand
+}
+
+// SessionNonce returns the per-session nonce for SSID uniqueness.
+// Returns nil if not set.
+func (params *Parameters) SessionNonce() *big.Int {
+	return params.sessionNonce
+}
+
+// SetSessionNonce sets a per-session nonce that all parties must agree on.
+// This value is mixed into the SSID to provide GG20 session binding, preventing
+// cross-session proof replay attacks. All parties in the same session MUST use
+// the same nonce value. The caller is responsible for coordinating this.
+func (params *Parameters) SetSessionNonce(nonce *big.Int) {
+	params.sessionNonce = nonce
 }
 
 // ----- //
