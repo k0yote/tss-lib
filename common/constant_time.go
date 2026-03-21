@@ -17,7 +17,6 @@ package common
 import (
 	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -54,7 +53,7 @@ func IsConstantTimeEnabled() bool {
 type CTModInt struct {
 	mod         *bigmod.Modulus
 	modBigInt   *big.Int
-	modMinusTwo []byte // For Fermat inverse: a^(p-2) mod p
+	inverseExp []byte // Exponent for modular inverse: p-2 (prime) or phi(n)-1 (composite)
 	byteLen     int
 	bytePool    sync.Pool
 }
@@ -74,9 +73,9 @@ func NewCTModInt(mod *big.Int) *CTModInt {
 
 	byteLen := len(modBytes)
 	return &CTModInt{
-		mod:         m,
-		modBigInt:   new(big.Int).Set(mod),
-		modMinusTwo: modMinusTwo.Bytes(),
+		mod:        m,
+		modBigInt:  new(big.Int).Set(mod),
+		inverseExp: modMinusTwo.Bytes(),
 		byteLen:     byteLen,
 		bytePool: sync.Pool{
 			New: func() interface{} {
@@ -115,7 +114,12 @@ func (ct *CTModInt) ExpCT(base, exp *big.Int) *big.Int {
 	}
 
 	paddedBase := ct.reduceToPaddedBytes(base)
-	defer ct.bytePool.Put(paddedBase)
+	defer func() {
+		for i := range paddedBase {
+			paddedBase[i] = 0
+		}
+		ct.bytePool.Put(paddedBase)
+	}()
 
 	baseNat := bigmod.NewNat()
 	baseNat.SetBytes(paddedBase, ct.mod)
@@ -139,13 +143,18 @@ func (ct *CTModInt) ModInverseCT(a *big.Int) *big.Int {
 	}
 
 	paddedA := ct.reduceToPaddedBytes(a)
-	defer ct.bytePool.Put(paddedA)
+	defer func() {
+		for i := range paddedA {
+			paddedA[i] = 0
+		}
+		ct.bytePool.Put(paddedA)
+	}()
 
 	aNat := bigmod.NewNat()
 	aNat.SetBytes(paddedA, ct.mod)
 
 	result := bigmod.NewNat()
-	result.Exp(aNat, ct.modMinusTwo, ct.mod)
+	result.Exp(aNat, ct.inverseExp, ct.mod)
 
 	return new(big.Int).SetBytes(result.Bytes(ct.mod))
 }
@@ -159,8 +168,18 @@ func (ct *CTModInt) Mod() *big.Int {
 func (ct *CTModInt) MulCT(x, y *big.Int) *big.Int {
 	paddedX := ct.reduceToPaddedBytes(x)
 	paddedY := ct.reduceToPaddedBytes(y)
-	defer ct.bytePool.Put(paddedX)
-	defer ct.bytePool.Put(paddedY)
+	defer func() {
+		for i := range paddedX {
+			paddedX[i] = 0
+		}
+		ct.bytePool.Put(paddedX)
+	}()
+	defer func() {
+		for i := range paddedY {
+			paddedY[i] = 0
+		}
+		ct.bytePool.Put(paddedY)
+	}()
 
 	xNat := bigmod.NewNat()
 	yNat := bigmod.NewNat()
@@ -189,7 +208,7 @@ func NewCTModIntWithPhi(mod, phiN *big.Int) *CTModInt {
 	return &CTModInt{
 		mod:         m,
 		modBigInt:   new(big.Int).Set(mod),
-		modMinusTwo: phiMinusOne.Bytes(), // Use phi(n)-1 instead of n-2
+		inverseExp: phiMinusOne.Bytes(), // Use phi(n)-1 instead of n-2
 		byteLen:     byteLen,
 		bytePool: sync.Pool{
 			New: func() interface{} {
@@ -197,20 +216,6 @@ func NewCTModIntWithPhi(mod, phiN *big.Int) *CTModInt {
 			},
 		},
 	}
-}
-
-// Global cache for CTModInt instances
-var ctModCache sync.Map
-
-// GetCTModInt returns a cached or new CTModInt for the given modulus.
-func GetCTModInt(mod *big.Int) *CTModInt {
-	key := hex.EncodeToString(mod.Bytes())
-	if cached, ok := ctModCache.Load(key); ok {
-		return cached.(*CTModInt)
-	}
-	ct := NewCTModInt(mod)
-	ctModCache.Store(key, ct)
-	return ct
 }
 
 // TimingProtection provides response time normalization to prevent timing attacks.

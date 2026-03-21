@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"runtime"
 	"strconv"
+	"sync"
 
 	"github.com/otiai10/primes"
 
@@ -47,6 +48,10 @@ type (
 		LambdaN, // lcm(p-1, q-1)
 		PhiN *big.Int // (p-1) * (q-1)
 		P, Q *big.Int
+
+		// cached M = N^(-1) mod PhiN, lazily computed
+		m    *big.Int
+		mOnce sync.Once
 	}
 
 	// Proof uses the new GenerateXs method in GG18Spec (6)
@@ -218,6 +223,14 @@ func (privateKey *PrivateKey) Decrypt(c *big.Int) (m *big.Int, err error) {
 	return
 }
 
+// M returns the cached value of N^(-1) mod PhiN, computing it on first call.
+func (privateKey *PrivateKey) M() *big.Int {
+	privateKey.mOnce.Do(func() {
+		privateKey.m = new(big.Int).ModInverse(privateKey.N, privateKey.PhiN)
+	})
+	return privateKey.m
+}
+
 // ----- //
 
 // Proof is an implementation of Gennaro, R., Micciancio, D., Rabin, T.:
@@ -229,14 +242,10 @@ func (privateKey *PrivateKey) Proof(k *big.Int, ecdsaPub *crypto2.ECPoint) Proof
 	iters := ProofIters
 	xs := GenerateXs(iters, k, privateKey.N, ecdsaPub)
 
-	// Compute M = N^(-1) mod PhiN once
-	var M *big.Int
-	if common.IsConstantTimeEnabled() {
-		// N^(-1) mod PhiN: PhiN is even so bigmod (which requires odd modulus) cannot be used.
-		// This is a prover-side computation where we already hold P, Q — timing leakage from
-		// ModInverse here doesn't expose secrets to external observers.
-		M = new(big.Int).ModInverse(privateKey.N, privateKey.PhiN)
+	// M = N^(-1) mod PhiN is precomputed and cached on the private key.
+	M := privateKey.M()
 
+	if common.IsConstantTimeEnabled() {
 		// SECURITY: Use constant-time exponentiation for xs[i]^M mod N.
 		// M is derived from secret PhiN, so we must use constant-time Exp.
 		// N is odd, so bigmod works correctly here.
@@ -245,7 +254,6 @@ func (privateKey *PrivateKey) Proof(k *big.Int, ecdsaPub *crypto2.ECPoint) Proof
 			pi[i] = ctModN.ExpCT(xs[i], M)
 		}
 	} else {
-		M = new(big.Int).ModInverse(privateKey.N, privateKey.PhiN)
 		// Standard (non-constant-time) implementation for better performance
 		for i := 0; i < iters; i++ {
 			pi[i] = new(big.Int).Exp(xs[i], M, privateKey.N)
