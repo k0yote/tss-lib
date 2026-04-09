@@ -11,12 +11,12 @@ import (
 	"math/big"
 
 	"github.com/agl/ed25519/edwards25519"
-	"github.com/bnb-chain/tss-lib/v2/common"
+	"github.com/bnb-chain/tss-lib/v3/common"
 	"github.com/pkg/errors"
 
-	"github.com/bnb-chain/tss-lib/v2/crypto"
-	"github.com/bnb-chain/tss-lib/v2/crypto/commitments"
-	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/bnb-chain/tss-lib/v3/crypto"
+	"github.com/bnb-chain/tss-lib/v3/crypto/commitments"
+	"github.com/bnb-chain/tss-lib/v3/tss"
 )
 
 func (round *round3) Start() *tss.Error {
@@ -53,10 +53,10 @@ func (round *round3) Start() *tss.Error {
 		}
 
 		Rj, err := crypto.NewECPoint(round.Params().EC(), coordinates[0], coordinates[1])
-		Rj = Rj.EightInvEight()
 		if err != nil {
 			return round.WrapError(errors.Wrapf(err, "NewECPoint(Rj)"), Pj)
 		}
+		Rj = Rj.EightInvEight()
 		proof, err := r2msg.UnmarshalZKProof(round.Params().EC())
 		if err != nil {
 			return round.WrapError(errors.New("failed to unmarshal Rj proof"), Pj)

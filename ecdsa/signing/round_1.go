@@ -11,12 +11,12 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
-	"github.com/bnb-chain/tss-lib/v2/crypto"
-	"github.com/bnb-chain/tss-lib/v2/crypto/commitments"
-	"github.com/bnb-chain/tss-lib/v2/crypto/mta"
-	"github.com/bnb-chain/tss-lib/v2/ecdsa/keygen"
-	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/bnb-chain/tss-lib/v3/common"
+	"github.com/bnb-chain/tss-lib/v3/crypto"
+	"github.com/bnb-chain/tss-lib/v3/crypto/commitments"
+	"github.com/bnb-chain/tss-lib/v3/crypto/mta"
+	"github.com/bnb-chain/tss-lib/v3/ecdsa/keygen"
+	"github.com/bnb-chain/tss-lib/v3/tss"
 )
 
 var zero = big.NewInt(0)
@@ -44,7 +44,13 @@ func (round *round1) Start() *tss.Error {
 	round.number = 1
 	round.started = true
 	round.resetOK()
-	round.temp.ssidNonce = new(big.Int).SetUint64(0)
+	// GG20 session binding: use caller-provided session nonce if available,
+	// otherwise fall back to the message hash for per-session SSID uniqueness.
+	if nonce := round.Params().SessionNonce(); nonce != nil {
+		round.temp.ssidNonce = new(big.Int).Set(nonce)
+	} else {
+		round.temp.ssidNonce = new(big.Int).Set(round.temp.m)
+	}
 	ssid, err := round.getSSID()
 	if err != nil {
 		return round.WrapError(err)
@@ -68,7 +74,11 @@ func (round *round1) Start() *tss.Error {
 		if j == i {
 			continue
 		}
-		cA, pi, err := mta.AliceInit(round.Params().EC(), round.key.PaillierPKs[i], k, round.key.NTildej[j], round.key.H1j[j], round.key.H2j[j], round.Rand())
+		// Use ssid + j (receiver's index) as Session context so that the verifier (party j)
+		// can reconstruct the same challenge using their ContextI = ssid + j in round 2.
+		ContextJ := append([]byte(nil), round.temp.ssid...)
+		ContextJ = append(ContextJ, new(big.Int).SetUint64(uint64(j)).Bytes()...)
+		cA, pi, err := mta.AliceInit(ContextJ, round.Params().EC(), round.key.PaillierPKs[i], k, round.key.NTildej[j], round.key.H1j[j], round.key.H2j[j], round.Rand())
 		if err != nil {
 			return round.WrapError(fmt.Errorf("failed to init mta: %v", err))
 		}

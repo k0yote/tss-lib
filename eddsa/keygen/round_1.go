@@ -10,11 +10,11 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
-	"github.com/bnb-chain/tss-lib/v2/crypto"
-	cmts "github.com/bnb-chain/tss-lib/v2/crypto/commitments"
-	"github.com/bnb-chain/tss-lib/v2/crypto/vss"
-	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/bnb-chain/tss-lib/v3/common"
+	"github.com/bnb-chain/tss-lib/v3/crypto"
+	cmts "github.com/bnb-chain/tss-lib/v3/crypto/commitments"
+	"github.com/bnb-chain/tss-lib/v3/crypto/vss"
+	"github.com/bnb-chain/tss-lib/v3/tss"
 )
 
 var zero = big.NewInt(0)
@@ -37,7 +37,15 @@ func (round *round1) Start() *tss.Error {
 	Pi := round.PartyID()
 	i := Pi.Index
 
-	round.temp.ssidNonce = new(big.Int).SetUint64(0)
+	// GG20 session binding: use caller-provided session nonce if available.
+	// For keygen, all parties must agree on the nonce via external coordination
+	// (e.g., coordinator-assigned session ID) since no shared session-unique
+	// value is available within the protocol itself.
+	if nonce := round.Params().SessionNonce(); nonce != nil {
+		round.temp.ssidNonce = new(big.Int).Set(nonce)
+	} else {
+		round.temp.ssidNonce = new(big.Int).SetUint64(0)
+	}
 	ssid, err := round.getSSID()
 	if err != nil {
 		return round.WrapError(err)

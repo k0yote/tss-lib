@@ -11,11 +11,11 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
-	"github.com/bnb-chain/tss-lib/v2/crypto"
-	"github.com/bnb-chain/tss-lib/v2/crypto/commitments"
-	"github.com/bnb-chain/tss-lib/v2/eddsa/keygen"
-	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/bnb-chain/tss-lib/v3/common"
+	"github.com/bnb-chain/tss-lib/v3/crypto"
+	"github.com/bnb-chain/tss-lib/v3/crypto/commitments"
+	"github.com/bnb-chain/tss-lib/v3/eddsa/keygen"
+	"github.com/bnb-chain/tss-lib/v3/tss"
 )
 
 // round 1 represents round 1 of the signing part of the EDDSA TSS spec
@@ -34,7 +34,13 @@ func (round *round1) Start() *tss.Error {
 	round.started = true
 	round.resetOK()
 
-	round.temp.ssidNonce = new(big.Int).SetUint64(0)
+	// GG20 session binding: use caller-provided session nonce if available,
+	// otherwise fall back to the message hash for per-session SSID uniqueness.
+	if nonce := round.Params().SessionNonce(); nonce != nil {
+		round.temp.ssidNonce = new(big.Int).Set(nonce)
+	} else {
+		round.temp.ssidNonce = new(big.Int).Set(round.temp.m)
+	}
 	var err error
 	round.temp.ssid, err = round.getSSID()
 	if err != nil {

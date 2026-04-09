@@ -11,12 +11,12 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/bnb-chain/tss-lib/v2/crypto"
-	"github.com/bnb-chain/tss-lib/v2/crypto/commitments"
-	"github.com/bnb-chain/tss-lib/v2/crypto/vss"
-	"github.com/bnb-chain/tss-lib/v2/ecdsa/keygen"
-	"github.com/bnb-chain/tss-lib/v2/ecdsa/signing"
-	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/bnb-chain/tss-lib/v3/crypto"
+	"github.com/bnb-chain/tss-lib/v3/crypto/commitments"
+	"github.com/bnb-chain/tss-lib/v3/crypto/vss"
+	"github.com/bnb-chain/tss-lib/v3/ecdsa/keygen"
+	"github.com/bnb-chain/tss-lib/v3/ecdsa/signing"
+	"github.com/bnb-chain/tss-lib/v3/tss"
 )
 
 // round 1 represents round 1 of the keygen part of the GG18 ECDSA TSS spec (Gennaro, Goldfeder; 2018)
@@ -40,7 +40,15 @@ func (round *round1) Start() *tss.Error {
 	}
 	round.allOldOK()
 
-	round.temp.ssidNonce = new(big.Int).SetUint64(uint64(0))
+	// GG20 session binding: use caller-provided session nonce if available.
+	// For resharing, all parties must agree on the nonce via external coordination
+	// (e.g., coordinator-assigned session ID) since no shared session-unique
+	// value is available within the protocol itself.
+	if nonce := round.Params().SessionNonce(); nonce != nil {
+		round.temp.ssidNonce = new(big.Int).Set(nonce)
+	} else {
+		round.temp.ssidNonce = new(big.Int).SetUint64(0)
+	}
 	ssid, err := round.getSSID()
 	if err != nil {
 		return round.WrapError(err)

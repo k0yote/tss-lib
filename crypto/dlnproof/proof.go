@@ -16,8 +16,8 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
-	cmts "github.com/bnb-chain/tss-lib/v2/crypto/commitments"
+	"github.com/bnb-chain/tss-lib/v3/common"
+	cmts "github.com/bnb-chain/tss-lib/v3/crypto/commitments"
 )
 
 const Iterations = 128
@@ -31,28 +31,51 @@ type (
 
 var one = big.NewInt(1)
 
-func NewDLNProof(h1, h2, x, p, q, N *big.Int, rand io.Reader) *Proof {
+func NewDLNProof(Session []byte, h1, h2, x, p, q, N *big.Int, rand io.Reader) *Proof {
 	pMulQ := new(big.Int).Mul(p, q)
 	modN, modPQ := common.ModInt(N), common.ModInt(pMulQ)
 	a := make([]*big.Int, Iterations)
 	alpha := [Iterations]*big.Int{}
-	for i := range alpha {
-		a[i] = common.GetRandomPositiveInt(rand, pMulQ)
-		alpha[i] = modN.Exp(h1, a[i])
+
+	if common.IsConstantTimeEnabled() {
+		// SECURITY: Use constant-time exponentiation
+		ctModN := common.NewCTModInt(N)
+		for i := range alpha {
+			a[i] = common.GetRandomPositiveInt(rand, pMulQ)
+			alpha[i] = ctModN.ExpCT(h1, a[i])
+		}
+	} else {
+		for i := range alpha {
+			a[i] = common.GetRandomPositiveInt(rand, pMulQ)
+			alpha[i] = modN.Exp(h1, a[i])
+		}
 	}
+
 	msg := append([]*big.Int{h1, h2, N}, alpha[:]...)
-	c := common.SHA512_256i(msg...)
+	c := common.SHA512_256i_TAGGED(Session, msg...)
 	t := [Iterations]*big.Int{}
 	cIBI := new(big.Int)
-	for i := range t {
-		cI := c.Bit(i)
-		cIBI = cIBI.SetInt64(int64(cI))
-		t[i] = modPQ.Add(a[i], modPQ.Mul(cIBI, x))
+
+	if common.IsConstantTimeEnabled() {
+		// SECURITY: Use constant-time multiplication for secret x
+		ctModPQ := common.NewCTModInt(pMulQ)
+		for i := range t {
+			cI := c.Bit(i)
+			cIBI = cIBI.SetInt64(int64(cI))
+			cMulX := ctModPQ.MulCT(cIBI, x)
+			t[i] = modPQ.Add(a[i], cMulX)
+		}
+	} else {
+		for i := range t {
+			cI := c.Bit(i)
+			cIBI = cIBI.SetInt64(int64(cI))
+			t[i] = modPQ.Add(a[i], modPQ.Mul(cIBI, x))
+		}
 	}
 	return &Proof{alpha, t}
 }
 
-func (p *Proof) Verify(h1, h2, N *big.Int) bool {
+func (p *Proof) Verify(Session []byte, h1, h2, N *big.Int) bool {
 	if p == nil {
 		return false
 	}
@@ -84,7 +107,7 @@ func (p *Proof) Verify(h1, h2, N *big.Int) bool {
 		}
 	}
 	msg := append([]*big.Int{h1, h2, N}, p.Alpha[:]...)
-	c := common.SHA512_256i(msg...)
+	c := common.SHA512_256i_TAGGED(Session, msg...)
 	cIBI := new(big.Int)
 	for i := 0; i < Iterations; i++ {
 		if p.Alpha[i] == nil || p.T[i] == nil {

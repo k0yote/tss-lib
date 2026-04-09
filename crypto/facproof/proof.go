@@ -13,7 +13,7 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
+	"github.com/bnb-chain/tss-lib/v3/common"
 )
 
 const (
@@ -60,12 +60,26 @@ func NewProof(Session []byte, ec elliptic.Curve, N0, NCap, s, t, N0p, N0q *big.I
 
 	// Fig 28.1 compute
 	modNCap := common.ModInt(NCap)
-	P := modNCap.Exp(s, N0p)
-	P = modNCap.Mul(P, modNCap.Exp(t, mu))
 
-	Q := modNCap.Exp(s, N0q)
-	Q = modNCap.Mul(Q, modNCap.Exp(t, nu))
+	var P, Q *big.Int
+	if common.IsConstantTimeEnabled() {
+		// SECURITY: Use constant-time exponentiation for secret exponents N0p, N0q
+		// See: https://github.com/golang/go/issues/20654
+		ctModNCap := common.NewCTModInt(NCap)
+		P = ctModNCap.ExpCT(s, N0p)
+		Q = ctModNCap.ExpCT(s, N0q)
+	} else {
+		P = modNCap.Exp(s, N0p)
+		Q = modNCap.Exp(s, N0q)
+	}
 
+	// P = s^N0p * t^mu mod NCap
+	P = modNCap.Mul(P, modNCap.Exp(t, mu)) // mu is random, not secret
+
+	// Q = s^N0q * t^nu mod NCap
+	Q = modNCap.Mul(Q, modNCap.Exp(t, nu)) // nu is random, not secret
+
+	// A, B, T use random exponents (alpha, beta, x, y, r) - non-secret, regular exp is fine
 	A := modNCap.Exp(s, alpha)
 	A = modNCap.Mul(A, modNCap.Exp(t, x))
 
@@ -83,9 +97,11 @@ func NewProof(Session []byte, ec elliptic.Curve, N0, NCap, s, t, N0p, N0q *big.I
 	}
 
 	// Fig 28.3
+	// z1 = e * N0p + alpha (reveals N0p in the output, but that's part of the protocol)
 	z1 := new(big.Int).Mul(e, N0p)
 	z1 = new(big.Int).Add(z1, alpha)
 
+	// z2 = e * N0q + beta
 	z2 := new(big.Int).Mul(e, N0q)
 	z2 = new(big.Int).Add(z2, beta)
 

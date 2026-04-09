@@ -12,9 +12,9 @@ import (
 
 	errors2 "github.com/pkg/errors"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
-	"github.com/bnb-chain/tss-lib/v2/crypto/schnorr"
-	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/bnb-chain/tss-lib/v3/common"
+	"github.com/bnb-chain/tss-lib/v3/crypto/schnorr"
+	"github.com/bnb-chain/tss-lib/v3/tss"
 )
 
 func (round *round4) Start() *tss.Error {
@@ -40,7 +40,14 @@ func (round *round4) Start() *tss.Error {
 	}
 
 	// compute the multiplicative inverse thelta mod q
-	thetaInverse = modN.ModInverse(thetaInverse)
+	if common.IsConstantTimeEnabled() {
+		// SECURITY: Use constant-time modular inverse for secret theta
+		// See: https://github.com/golang/go/issues/20654
+		ctModN := common.NewCTModInt(round.Params().EC().Params().N)
+		thetaInverse = ctModN.ModInverseCT(thetaInverse)
+	} else {
+		thetaInverse = modN.ModInverse(thetaInverse)
+	}
 	i := round.PartyID().Index
 	ContextI := append(round.temp.ssid, new(big.Int).SetUint64(uint64(i)).Bytes()...)
 	piGamma, err := schnorr.NewZKProof(ContextI, round.temp.gamma, round.temp.pointGamma, round.Rand())

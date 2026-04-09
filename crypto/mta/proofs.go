@@ -13,10 +13,10 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
-	"github.com/bnb-chain/tss-lib/v2/crypto"
-	"github.com/bnb-chain/tss-lib/v2/crypto/paillier"
-	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/bnb-chain/tss-lib/v3/common"
+	"github.com/bnb-chain/tss-lib/v3/crypto"
+	"github.com/bnb-chain/tss-lib/v3/crypto/paillier"
+	"github.com/bnb-chain/tss-lib/v3/tss"
 )
 
 const (
@@ -77,16 +77,34 @@ func ProveBobWC(Session []byte, ec elliptic.Curve, pk *paillier.PublicKey, NTild
 
 	// 6.
 	modNTilde := common.ModInt(NTilde)
-	z := modNTilde.Exp(h1, x)
-	z = modNTilde.Mul(z, modNTilde.Exp(h2, rho))
+	var ctModNTilde *common.CTModInt
+	if common.IsConstantTimeEnabled() {
+		ctModNTilde = common.NewCTModInt(NTilde)
+	}
+
+	var z *big.Int
+	if ctModNTilde != nil {
+		// SECURITY: Use constant-time exponentiation for secret x
+		// See: https://github.com/golang/go/issues/20654
+		z = ctModNTilde.ExpCT(h1, x)
+	} else {
+		z = modNTilde.Exp(h1, x)
+	}
+	z = modNTilde.Mul(z, modNTilde.Exp(h2, rho)) // rho is random, not secret
 
 	// 7.
 	zPrm := modNTilde.Exp(h1, alpha)
 	zPrm = modNTilde.Mul(zPrm, modNTilde.Exp(h2, rhoPrm))
 
 	// 8.
-	t := modNTilde.Exp(h1, y)
-	t = modNTilde.Mul(t, modNTilde.Exp(h2, sigma))
+	var t *big.Int
+	if ctModNTilde != nil {
+		// SECURITY: Use constant-time exponentiation for secret y
+		t = ctModNTilde.ExpCT(h1, y)
+	} else {
+		t = modNTilde.Exp(h1, y)
+	}
+	t = modNTilde.Mul(t, modNTilde.Exp(h2, sigma)) // sigma is random, not secret
 
 	// 9.
 	modNSquared := common.ModInt(NSquared)
@@ -104,9 +122,9 @@ func ProveBobWC(Session []byte, ec elliptic.Curve, pk *paillier.PublicKey, NTild
 		var eHash *big.Int
 		// X is nil if called by ProveBob (Bob's proof "without check")
 		if X == nil {
-			eHash = common.SHA512_256i_TAGGED(Session, append(pk.AsInts(), c1, c2, z, zPrm, t, v, w)...)
+			eHash = common.SHA512_256i_TAGGED(Session, append(pk.AsInts(), NTilde, h1, h2, c1, c2, z, zPrm, t, v, w)...)
 		} else {
-			eHash = common.SHA512_256i_TAGGED(Session, append(pk.AsInts(), X.X(), X.Y(), c1, c2, u.X(), u.Y(), z, zPrm, t, v, w)...)
+			eHash = common.SHA512_256i_TAGGED(Session, append(pk.AsInts(), NTilde, h1, h2, X.X(), X.Y(), c1, c2, u.X(), u.Y(), z, zPrm, t, v, w)...)
 		}
 		e = common.RejectionSample(q, eHash)
 	}
@@ -275,12 +293,12 @@ func (pf *ProofBobWC) Verify(Session []byte, ec elliptic.Curve, pk *paillier.Pub
 		var eHash *big.Int
 		// X is nil if called on a ProveBob (Bob's proof "without check")
 		if X == nil {
-			eHash = common.SHA512_256i_TAGGED(Session, append(pk.AsInts(), c1, c2, pf.Z, pf.ZPrm, pf.T, pf.V, pf.W)...)
+			eHash = common.SHA512_256i_TAGGED(Session, append(pk.AsInts(), NTilde, h1, h2, c1, c2, pf.Z, pf.ZPrm, pf.T, pf.V, pf.W)...)
 		} else {
 			if !tss.SameCurve(ec, X.Curve()) {
 				return false
 			}
-			eHash = common.SHA512_256i_TAGGED(Session, append(pk.AsInts(), X.X(), X.Y(), c1, c2, pf.U.X(), pf.U.Y(), pf.Z, pf.ZPrm, pf.T, pf.V, pf.W)...)
+			eHash = common.SHA512_256i_TAGGED(Session, append(pk.AsInts(), NTilde, h1, h2, X.X(), X.Y(), c1, c2, pf.U.X(), pf.U.Y(), pf.Z, pf.ZPrm, pf.T, pf.V, pf.W)...)
 		}
 		e = common.RejectionSample(q, eHash)
 	}

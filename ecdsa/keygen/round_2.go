@@ -12,11 +12,11 @@ import (
 	"math/big"
 	"sync"
 
-	"github.com/bnb-chain/tss-lib/v2/crypto/facproof"
-	"github.com/bnb-chain/tss-lib/v2/crypto/modproof"
+	"github.com/bnb-chain/tss-lib/v3/crypto/facproof"
+	"github.com/bnb-chain/tss-lib/v3/crypto/modproof"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
-	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/bnb-chain/tss-lib/v3/common"
+	"github.com/bnb-chain/tss-lib/v3/tss"
 )
 
 const (
@@ -73,13 +73,13 @@ func (round *round2) Start() *tss.Error {
 		_j := j
 		_msg := msg
 
-		dlnVerifier.VerifyDLNProof1(r1msg, H1j, H2j, NTildej, func(isValid bool) {
+		dlnVerifier.VerifyDLNProof1(round.temp.ssid, r1msg, H1j, H2j, NTildej, func(isValid bool) {
 			if !isValid {
 				dlnProof1FailCulprits[_j] = _msg.GetFrom()
 			}
 			wg.Done()
 		})
-		dlnVerifier.VerifyDLNProof2(r1msg, H2j, H1j, NTildej, func(isValid bool) {
+		dlnVerifier.VerifyDLNProof2(round.temp.ssid, r1msg, H2j, H1j, NTildej, func(isValid bool) {
 			if !isValid {
 				dlnProof2FailCulprits[_j] = _msg.GetFrom()
 			}

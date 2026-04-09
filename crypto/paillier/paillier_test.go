@@ -15,10 +15,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
-	"github.com/bnb-chain/tss-lib/v2/crypto"
-	. "github.com/bnb-chain/tss-lib/v2/crypto/paillier"
-	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/bnb-chain/tss-lib/v3/common"
+	"github.com/bnb-chain/tss-lib/v3/crypto"
+	. "github.com/bnb-chain/tss-lib/v3/crypto/paillier"
+	"github.com/bnb-chain/tss-lib/v3/tss"
 )
 
 // Using a modulus length of 2048 is recommended in the GG18 spec
@@ -154,4 +154,33 @@ func TestGenerateXs(t *testing.T) {
 	for _, xi := range xs {
 		assert.True(t, common.IsNumberInMultiplicativeGroup(N, xi))
 	}
+}
+
+func TestEncryptDecryptCT(t *testing.T) {
+	setUp(t)
+	common.EnableConstantTimeOps()
+	defer common.DisableConstantTimeOps()
+
+	exp := big.NewInt(100)
+	cypher, err := privateKey.Encrypt(rand.Reader, exp)
+	assert.NoError(t, err)
+
+	ret, err := privateKey.Decrypt(cypher)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, exp.Cmp(ret),
+		"CT decryption mismatch: got ", ret, " expected ", exp)
+}
+
+func TestProofVerifyCT(t *testing.T) {
+	setUp(t)
+	common.EnableConstantTimeOps()
+	defer common.DisableConstantTimeOps()
+
+	ki := common.MustGetRandomInt(rand.Reader, 256)
+	ui := common.GetRandomPositiveInt(rand.Reader, tss.EC().Params().N)
+	yX, yY := tss.EC().ScalarBaseMult(ui.Bytes())
+	proof := privateKey.Proof(ki, crypto.NewECPointNoCurveCheck(tss.EC(), yX, yY))
+	res, err := proof.Verify(publicKey.N, ki, crypto.NewECPointNoCurveCheck(tss.EC(), yX, yY))
+	assert.NoError(t, err)
+	assert.True(t, res, "CT proof verify result must be true")
 }

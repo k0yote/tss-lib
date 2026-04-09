@@ -18,7 +18,7 @@ import (
 
 	"github.com/decred/dcrd/dcrec/edwards/v2"
 
-	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/bnb-chain/tss-lib/v3/tss"
 )
 
 // ECPoint convenience helper
@@ -115,6 +115,12 @@ func ScalarBaseMult(curve elliptic.Curve, k *big.Int) *ECPoint {
 
 func isOnCurve(c elliptic.Curve, x, y *big.Int) bool {
 	if x == nil || y == nil {
+		return false
+	}
+	// Reject coordinates outside [0, P) to prevent non-canonical point representations
+	// from bypassing the curve equation check via modular reduction (SRC-2026-573).
+	P := c.Params().P
+	if x.Sign() < 0 || x.Cmp(P) >= 0 || y.Sign() < 0 || y.Cmp(P) >= 0 {
 		return false
 	}
 	return c.IsOnCurve(x, y)

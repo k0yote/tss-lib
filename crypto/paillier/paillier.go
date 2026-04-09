@@ -24,11 +24,12 @@ import (
 	"math/big"
 	"runtime"
 	"strconv"
+	"sync"
 
 	"github.com/otiai10/primes"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
-	crypto2 "github.com/bnb-chain/tss-lib/v2/crypto"
+	"github.com/bnb-chain/tss-lib/v3/common"
+	crypto2 "github.com/bnb-chain/tss-lib/v3/crypto"
 )
 
 const (
@@ -47,6 +48,10 @@ type (
 		LambdaN, // lcm(p-1, q-1)
 		PhiN *big.Int // (p-1) * (q-1)
 		P, Q *big.Int
+
+		// cached M = N^(-1) mod PhiN, lazily computed
+		m    *big.Int
+		mOnce sync.Once
 	}
 
 	// Proof uses the new GenerateXs method in GG18Spec (6)
@@ -180,14 +185,50 @@ func (privateKey *PrivateKey) Decrypt(c *big.Int) (m *big.Int, err error) {
 	if cg.Cmp(one) == 1 {
 		return nil, ErrMessageMalFormed
 	}
+
+	var cExpLambda, gammaExpLambda *big.Int
+
+	if common.IsConstantTimeEnabled() {
+		// SECURITY: Use constant-time exponentiation to prevent timing side-channels.
+		// The original code used math/big.Exp which leaks information about the secret
+		// exponent LambdaN through execution time variations.
+		// See: https://github.com/golang/go/issues/20654
+		ctModN2 := common.NewCTModInt(N2)
+		cExpLambda = ctModN2.ExpCT(c, privateKey.LambdaN)
+		gammaExpLambda = ctModN2.ExpCT(privateKey.Gamma(), privateKey.LambdaN)
+	} else {
+		// Standard (non-constant-time) implementation for better performance
+		cExpLambda = new(big.Int).Exp(c, privateKey.LambdaN, N2)
+		gammaExpLambda = new(big.Int).Exp(privateKey.Gamma(), privateKey.LambdaN, N2)
+	}
+
 	// 1. L(u) = (c^LambdaN-1 mod N2) / N
-	Lc := L(new(big.Int).Exp(c, privateKey.LambdaN, N2), privateKey.N)
+	Lc := L(cExpLambda, privateKey.N)
+
 	// 2. L(u) = (Gamma^LambdaN-1 mod N2) / N
-	Lg := L(new(big.Int).Exp(privateKey.Gamma(), privateKey.LambdaN, N2), privateKey.N)
+	Lg := L(gammaExpLambda, privateKey.N)
+
 	// 3. (1) * modInv(2) mod N
-	inv := new(big.Int).ModInverse(Lg, privateKey.N)
+	var inv *big.Int
+	if common.IsConstantTimeEnabled() {
+		// SECURITY: Use constant-time ModInverse to prevent timing side-channels.
+		// Lg is derived from secret LambdaN exponentiation.
+		// N = P*Q is composite, so we must provide phi(N) for Euler's theorem.
+		ctModN := common.NewCTModIntWithPhi(privateKey.N, privateKey.PhiN)
+		inv = ctModN.ModInverseCT(Lg)
+	} else {
+		inv = new(big.Int).ModInverse(Lg, privateKey.N)
+	}
 	m = common.ModInt(privateKey.N).Mul(Lc, inv)
 	return
+}
+
+// M returns the cached value of N^(-1) mod PhiN, computing it on first call.
+func (privateKey *PrivateKey) M() *big.Int {
+	privateKey.mOnce.Do(func() {
+		privateKey.m = new(big.Int).ModInverse(privateKey.N, privateKey.PhiN)
+	})
+	return privateKey.m
 }
 
 // ----- //
@@ -200,9 +241,23 @@ func (privateKey *PrivateKey) Proof(k *big.Int, ecdsaPub *crypto2.ECPoint) Proof
 	var pi Proof
 	iters := ProofIters
 	xs := GenerateXs(iters, k, privateKey.N, ecdsaPub)
-	for i := 0; i < iters; i++ {
-		M := new(big.Int).ModInverse(privateKey.N, privateKey.PhiN)
-		pi[i] = new(big.Int).Exp(xs[i], M, privateKey.N)
+
+	// M = N^(-1) mod PhiN is precomputed and cached on the private key.
+	M := privateKey.M()
+
+	if common.IsConstantTimeEnabled() {
+		// SECURITY: Use constant-time exponentiation for xs[i]^M mod N.
+		// M is derived from secret PhiN, so we must use constant-time Exp.
+		// N is odd, so bigmod works correctly here.
+		ctModN := common.NewCTModInt(privateKey.N)
+		for i := 0; i < iters; i++ {
+			pi[i] = ctModN.ExpCT(xs[i], M)
+		}
+	} else {
+		// Standard (non-constant-time) implementation for better performance
+		for i := 0; i < iters; i++ {
+			pi[i] = new(big.Int).Exp(xs[i], M, privateKey.N)
+		}
 	}
 	return pi
 }

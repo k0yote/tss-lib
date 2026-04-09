@@ -12,10 +12,10 @@ import (
 
 	errors2 "github.com/pkg/errors"
 
-	"github.com/bnb-chain/tss-lib/v2/common"
-	"github.com/bnb-chain/tss-lib/v2/crypto"
-	"github.com/bnb-chain/tss-lib/v2/crypto/commitments"
-	"github.com/bnb-chain/tss-lib/v2/tss"
+	"github.com/bnb-chain/tss-lib/v3/common"
+	"github.com/bnb-chain/tss-lib/v3/crypto"
+	"github.com/bnb-chain/tss-lib/v3/crypto/commitments"
+	"github.com/bnb-chain/tss-lib/v3/tss"
 )
 
 func (round *round5) Start() *tss.Error {
@@ -63,7 +63,17 @@ func (round *round5) Start() *tss.Error {
 	modN := common.ModInt(N)
 	rx := R.X()
 	ry := R.Y()
-	si := modN.Add(modN.Mul(round.temp.m, round.temp.k), modN.Mul(rx, round.temp.sigma))
+
+	var si *big.Int
+	if common.IsConstantTimeEnabled() {
+		// SECURITY: Use constant-time multiplication for secret values m, k, sigma
+		ctModN := common.NewCTModInt(N)
+		mk := ctModN.MulCT(round.temp.m, round.temp.k)
+		rxSigma := ctModN.MulCT(rx, round.temp.sigma)
+		si = modN.Add(mk, rxSigma)
+	} else {
+		si = modN.Add(modN.Mul(round.temp.m, round.temp.k), modN.Mul(rx, round.temp.sigma))
+	}
 
 	// clear temp.w and temp.k from memory, lint ignore
 	round.temp.w = zero
